@@ -17,12 +17,20 @@ class DataLoader:
     def load_adresse(self) -> pd.DataFrame:
         """Load the addresses dataset."""
         path = self.data_dir / "adresseSchema.csv"
-        return pd.read_csv(path, encoding="utf-8")
+        return pd.read_csv(
+            path,
+            encoding="utf-8",
+            dtype={"schema:postalCode": str},
+        )
 
     def load_einrichtung(self) -> pd.DataFrame:
         """Load the facilities dataset."""
         path = self.data_dir / "einrichtungSchema.csv"
-        return pd.read_csv(path, encoding="utf-8")
+        return pd.read_csv(
+            path,
+            encoding="utf-8",
+            dtype={"schema:telephone": str},
+        )
 
     def load_traeger(self) -> pd.DataFrame:
         """Load the providers/parent organizations dataset."""

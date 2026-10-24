@@ -207,6 +207,27 @@ def compare_facilities(
 
     return to_json(results)
 
+@mcp.tool()
+def get_awo_details(iri: str) -> str:
+    """
+    Get the address, map link, and opening hours for one AWO facility.
+
+    Args:
+        iri: Facility IRI, as returned by search_facilities or
+            get_facility_details.
+
+    Returns:
+        JSON containing the facility's address, Google Maps link,
+        telephone, homepage, opening hours, and accessibility notes.
+    """
+
+    result = repository.get_awo_details(iri)
+
+    if result is None:
+        return f"No AWO facility found with IRI '{iri}'."
+
+    return to_json(result)
+
 # --------------------------------------------------
 # Run server
 # --------------------------------------------------

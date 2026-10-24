@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 import pandas as pd
 
 
@@ -485,3 +487,53 @@ class DataRepository:
             )
 
         return results
+    def get_awo_details(self, iri: str) -> dict | None:
+        """Return address, map link, and opening hours for one facility."""
+
+        matches = self.einrichtung[self.einrichtung["iri"] == iri]
+
+        if matches.empty:
+            return None
+
+        facility = matches.iloc[0]
+        address = self.address_by_iri.get(facility["schema:address"]) or {}
+
+        def clean(value):
+            if pd.isna(value):
+                return ""
+            return str(value).strip()
+
+        street = clean(address.get("schema:streetAddress"))
+        postal_code = clean(address.get("schema:postalCode"))
+        city = clean(address.get("schema:addressLocality"))
+
+        locality = " ".join(part for part in [postal_code, city] if part)
+        address_text = ", ".join(part for part in [street, locality] if part)
+
+        latitude = address.get("schema:latitude")
+        longitude = address.get("schema:longitude")
+
+        if pd.notna(latitude) and pd.notna(longitude):
+            map_query = f"{latitude},{longitude}"
+        else:
+            map_query = ", ".join(
+                part for part in [clean(facility["schema:name"]), address_text] if part
+            )
+
+        map_url = (
+            "https://www.google.com/maps/search/?api=1&query="
+            + quote(map_query)
+            if map_query
+            else None
+        )
+
+        return {
+            "iri": facility["iri"],
+            "name": facility["schema:name"],
+            "address": address_text or None,
+            "map_url": map_url,
+            "telephone": facility["schema:telephone"],
+            "homepage": facility["foaf:homepage"],
+            "opening_hours": facility["schema:openingHours"],
+            "accessibility": facility["schema:accessibilitySummary"],
+        }
