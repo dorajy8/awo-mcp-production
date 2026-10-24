@@ -858,7 +858,12 @@ def facility_group(facility, offers: list[dict] | None = None) -> str:
 
 
 def matches_query(point: dict, query: str) -> bool:
-    """Check whether a search term appears in a facility's descriptive fields."""
+    """
+    Check whether any search term appears in a facility's descriptive fields.
+
+    Separate several terms with commas ("Alkohol, Sucht"); a facility matches
+    if it contains at least one of them.
+    """
 
     text = " ".join(
         [
@@ -868,12 +873,17 @@ def matches_query(point: dict, query: str) -> bool:
             point["category"] or "",
             point["services"] or "",
             point["alternate_name"] or "",
-            " ".join(offer["name"] for offer in point["offers"]),
+            " ".join(
+                f"{offer['name']} {offer['category'] or ''}"
+                for offer in point["offers"]
+            ),
             " ".join(point["audience"]),
         ]
     ).casefold()
 
-    return query.casefold() in text
+    terms = [term.strip().casefold() for term in query.split(",") if term.strip()]
+
+    return not terms or any(term in text for term in terms)
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

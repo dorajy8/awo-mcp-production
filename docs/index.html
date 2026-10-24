@@ -530,14 +530,15 @@ function matchesFilters(f) {
   if (!state.activeGroups.has(f.group)) return false;
   if ($("accessible").checked && f.accessible !== true) return false;
 
-  const query = $("query").value.trim().toLowerCase();
-  if (query) {
+  // Comma-separated terms match if any of them appears ("Alkohol, Sucht").
+  const terms = $("query").value.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
+  if (terms.length) {
     const text = [
       f.name, f.alternate_name, f.group, GROUP_LABELS[f.group], f.category, f.services,
       f.offers.map((o) => `${o.name} ${o.category || ""}`).join(" "), f.audience.join(" "), f.address,
     ]
       .filter(Boolean).join(" ").toLowerCase();
-    if (!text.includes(query)) return false;
+    if (!terms.some((term) => text.includes(term))) return false;
   }
   return true;
 }

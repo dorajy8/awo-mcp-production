@@ -43,7 +43,22 @@ Processed AWO Data (CSV)
 | `get_awo_details(iri)`       | Address, map link, opening hours   | "When is vista WIGWAM Connect open?"      |
 | `find_nearby(location, ...)` | Facilities near a place, nearest first | "Addiction help within 1 km of 13353" |
 
-`find_nearby` accepts `"latitude,longitude"`, a postal code, or part of a street name, plus optional `radius_km`, `query`, `accessible_only`, and `limit`.
+`find_nearby` accepts `"latitude,longitude"`, a postal code, or part of a street name, plus optional `radius_km`, `query`, `accessible_only`, and `limit`. Separate several search terms with commas (`"Sucht, Alkohol"`) to match any of them.
+
+### Available Prompts
+
+Prompts are ready-made starting points. In Claude Desktop, click **+** in the message box and choose them under the `awo` server.
+
+| Prompt                | What it does |
+| --------------------- | ------------ |
+| **Find help near me** | Takes a need in plain words ("I drink too much") and a location. Explains the kinds of help that exist and which is the usual first step, recommends 3–5 nearby places (who each is for, address, directions, hours, and a 1–5 relevance rating), lists who to contact first, and notes what the directory doesn't cover. Adds safety notes when relevant and puts emergency numbers first if someone is in danger. |
+
+Ratings measure how good a first step a place is for the stated need, based on the directory data (fit, distance, reachability, access), not the quality of the service. Places that only partly fit are capped at 3/5. Contacts are the facilities' own phone numbers and emails; the directory doesn't list individual staff.
+
+--------------------- | ---------------- | ------------------------------------------------------------------------------------------------ |
+| **Find help near me** | Anyone           | Takes a need in plain words ("I'm about to lose my flat") and a location, and finds matching services nearby with contact details and directions. Puts emergency numbers first if someone is in danger. |
+| **Prepare a referral** | Social workers  | Looks up a facility, checks its offers fit the client's need, and drafts a short referral message (German or English) without identifying details. |
+| **Data quality report** | Data maintainers | Runs the data quality tools and writes a report of issues, examples, and suggested fixes for the directory maintainers. |
 
 ---
 
