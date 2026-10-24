@@ -1,0 +1,65 @@
+# Builds the facility map from the federated directory and publishes it to
+# GitHub Pages. The data is fetched at build time and never committed.
+#
+# Setup:
+#   1. Settings → Secrets and variables → Actions → Variables:
+#      add AWO_DATA_SOURCE = URL of the directory's Turtle (.ttl) export.
+#   2. Settings → Pages → Source: "GitHub Actions".
+
+name: Publish facility map
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 4 * * 1"  # Weekly, to pick up directory updates
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install pandas "rdflib>=7.0"
+
+      - name: Export map data
+        env:
+          AWO_DATA_SOURCE: ${{ vars.AWO_DATA_SOURCE }}
+        run: |
+          if [ -z "$AWO_DATA_SOURCE" ]; then
+            echo "::error::Set the AWO_DATA_SOURCE repository variable to the directory's .ttl URL."
+            exit 1
+          fi
+          python export_map_data.py
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

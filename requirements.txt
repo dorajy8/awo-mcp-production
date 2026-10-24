@@ -1,3 +1,4 @@
 mcp>=1.13.0
 pandas>=2.2.0
 fastmcp
+rdflib>=7.0

@@ -6,7 +6,7 @@ MCP (Model Context Protocol) server that exposes processed AWO facility data to 
 
 This MCP server provides a standardized interface between AI assistants and AWO organizational data. It enables natural language queries about AWO facilities, services, and statistics.
 
-**Data Source:** Processed AWO datasets (facilities, addresses, services, providers)
+**Data Source:** The [civic-data.de](https://civic-data.de) federated directory (Turtle/RDF), loaded at startup. The data is not stored in this repository.
 
 **Status:** ✅ Production-ready
 
@@ -40,6 +40,10 @@ Processed AWO Data (CSV)
 | `check_completeness()`       | Check data quality                 | "Check data completeness for AWO records" |
 | `detect_duplicates()`        | Find duplicate records             | "Are there duplicates in the AWO data?"   |
 | `compare_facilities(f1, f2)` | Compare two facilities             | "Compare AWO Mitte and AWO Spree-Wuhle"   |
+| `get_awo_details(iri)`       | Address, map link, opening hours   | "When is vista WIGWAM Connect open?"      |
+| `find_nearby(location, ...)` | Facilities near a place, nearest first | "Addiction help within 1 km of 13353" |
+
+`find_nearby` accepts `"latitude,longitude"`, a postal code, or part of a street name, plus optional `radius_km`, `query`, `accessible_only`, and `limit`.
 
 ---
 
@@ -65,14 +69,17 @@ conda activate awo-mcp
 pip install -r requirements.txt
 ```
 
-### 4. Verify Data Files
+### 4. Configure the Data Source
 
-Ensure the following CSV files exist in the `data/` directory:
+The server reads the federated directory's Turtle (`.ttl`) export. Set `AWO_DATA_SOURCE` to its URL or a local file path:
 
-* `einrichtungSchema.csv` - Facilities
-* `adresseSchema.csv` - Addresses
-* `angebotSchema.csv` - Services
-* `traegerSchema.csv` - Providers
+```bash
+export AWO_DATA_SOURCE=https://example.org/path/to/directory.ttl
+```
+
+If `AWO_DATA_SOURCE` isn't set, the server looks for a local copy at `data/directory.ttl`. The `data/` folder is git-ignored, so local copies are never committed.
+
+A directory of the older CSV exports (`einrichtungSchema.csv`, `adresseSchema.csv`, `angebotSchema.csv`, `traegerSchema.csv`) also works as a source, but the Turtle export is preferred: the CSVs lost leading zeros in phone numbers and contain empty rows.
 
 ---
 
@@ -109,7 +116,10 @@ Download from [Claude Desktop](https://claude.ai/download).
       "command": "C:\\Users\\<YOUR_USERNAME>\\miniconda3\\envs\\awo-mcp\\python.exe",
       "args": [
         "D:\\path\\to\\awo-mcp-production\\server.py"
-      ]
+      ],
+      "env": {
+        "AWO_DATA_SOURCE": "https://example.org/path/to/directory.ttl"
+      }
     }
   }
 }
@@ -159,18 +169,59 @@ Once connected, try asking Claude:
 
 > "Compare AWO Mitte and AWO Spree-Wuhle"
 
+### Find Nearby Facilities
+
+> "Which wheelchair-accessible facilities are within 2 km of Leopoldplatz?"
+
+---
+
+## Facility Map
+
+`docs/` contains a standalone web map (Leaflet + OpenStreetMap) with the same nearby search: search by postal code, street, or place name, use your location, or click the map; filter by group, keyword, and wheelchair access.
+
+Click a pin or result to open its details: contact, opening hours, offers, accessibility, provider, directions, and a link to the source directory entry. Each facility has a shareable link (`#org-…`), and category names can be switched between English and German.
+
+### View it locally
+
+Generate `docs/facilities.json` from the data source (it is git-ignored):
+
+```bash
+python export_map_data.py
+```
+
+Then serve the folder:
+
+```bash
+python -m http.server 8765 --directory docs
+```
+
+Then open http://localhost:8765.
+
+### Publish it with GitHub Pages
+
+The workflow in `.github/workflows/pages.yml` fetches the directory, generates `facilities.json`, and publishes the map. It runs on every push to `main`, weekly, and on demand.
+
+1. **Settings → Secrets and variables → Actions → Variables:** add `AWO_DATA_SOURCE` with the directory's public `.ttl` URL.
+2. **Settings → Pages → Source:** choose **GitHub Actions**.
+
+The map is then served at `https://<username>.github.io/awo-mcp-production/`.
+
+Place names that aren't in the dataset are looked up with OpenStreetMap Nominatim, so those search terms are sent to OpenStreetMap.
+
 ---
 
 ## Data Overview
 
-The server uses four CSV datasets:
+The loader builds four tables from the directory's RDF types:
 
-| Dataset                 | Description             | Count |
-| ----------------------- | ----------------------- | ----- |
-| `einrichtungSchema.csv` | AWO facilities          | 168   |
-| `adresseSchema.csv`     | Addresses               | 108   |
-| `angebotSchema.csv`     | Services                | 99    |
-| `traegerSchema.csv`     | Providers/Organizations | 4     |
+| Table         | RDF type                  | Description             | Count |
+| ------------- | ------------------------- | ----------------------- | ----- |
+| `einrichtung` | `org:OrganizationalUnit`  | Facilities              | 166   |
+| `adresse`     | `schema:PostalAddress`    | Addresses               | 108   |
+| `angebot`     | `schema:Service`          | Services/offers         | 99    |
+| `traeger`     | `schema:Organization`     | Providers               | 4     |
+
+Counts are for the current Berlin export.
 
 ---
 
@@ -178,14 +229,16 @@ The server uses four CSV datasets:
 
 ```text
 awo-mcp-production/
-├── data/                      # CSV datasets
-│   ├── einrichtungSchema.csv
-│   ├── adresseSchema.csv
-│   ├── angebotSchema.csv
-│   └── traegerSchema.csv
+├── .github/workflows/
+│   └── pages.yml              # Builds and publishes the map
+├── data/                      # Optional local copy of the data (git-ignored)
 ├── src/                       # Core modules
-│   ├── data_loader.py
+│   ├── data_loader.py         # Loads Turtle (or legacy CSV) into tables
 │   └── data_repository.py
+├── docs/                      # Web map (GitHub Pages)
+│   ├── index.html
+│   └── facilities.json        # Generated, git-ignored
+├── export_map_data.py         # Exports map data from the data source
 ├── server.py                  # MCP server
 ├── requirements.txt
 └── README.md
@@ -246,7 +299,7 @@ Here a video of the demo with Claude Desktop:
 ### Server Fails to Start
 
 * Ensure all dependencies are installed.
-* Verify the `data/` folder exists with the required CSV files.
+* Check that `AWO_DATA_SOURCE` points to a reachable `.ttl` URL or file, or that `data/directory.ttl` exists.
 * Run the server manually to see any errors:
 
 ```bash

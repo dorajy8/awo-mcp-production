@@ -1,0 +1,781 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AWO Facility Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --text: #1d2330;
+    --muted: #5d6678;
+    --border: #dde1e8;
+    --accent: #c8102e;
+    --accent-text: #ffffff;
+    --input: #ffffff;
+    --hover: #f0f2f6;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151b;
+      --panel: #1b1f27;
+      --text: #e8ebf1;
+      --muted: #a0a8b8;
+      --border: #2e3440;
+      --accent: #ff4d5e;
+      --accent-text: #12151b;
+      --input: #232833;
+      --hover: #262c38;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151b;
+    --panel: #1b1f27;
+    --text: #e8ebf1;
+    --muted: #a0a8b8;
+    --border: #2e3440;
+    --accent: #ff4d5e;
+    --accent-text: #12151b;
+    --input: #232833;
+    --hover: #262c38;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    grid-template-rows: 100%;
+  }
+
+  aside {
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .controls { padding: 16px; border-bottom: 1px solid var(--border); }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  .title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .lang { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; flex: none; }
+  .lang button { border: none; border-radius: 0; padding: 4px 10px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .lang button + button { border-left: 1px solid var(--border); }
+  .lang button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); }
+  .subtitle { color: var(--muted); margin: 0 0 14px; font-size: 13px; }
+
+  label.field { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 10px 0 4px; }
+  .row { display: flex; gap: 8px; }
+  input[type="search"], input[type="text"], select {
+    width: 100%;
+    font: inherit;
+    color: var(--text);
+    background: var(--input);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  select { width: auto; }
+  button {
+    font: inherit;
+    border: 1px solid var(--border);
+    background: var(--input);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button:hover { background: var(--hover); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button.link { border: none; background: none; padding: 0; color: var(--accent); font-size: 12px; }
+  .status { min-height: 18px; font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .status.error { color: var(--accent); }
+
+  .groups { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 3px 10px 3px 8px; font-size: 12px; cursor: pointer; user-select: none;
+  }
+  .chip input { display: none; }
+  .chip .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .chip.off { opacity: .4; }
+  .check { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 13px; }
+
+  .summary { padding: 10px 16px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
+  ul.results { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
+  ul.results li {
+    padding: 10px 16px; border-bottom: 1px solid var(--border); cursor: pointer;
+    display: grid; grid-template-columns: 10px 1fr auto; gap: 4px 10px; align-items: baseline;
+  }
+  ul.results li:hover, ul.results li:focus { background: var(--hover); outline: none; }
+  ul.results .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 4px; }
+  ul.results .name { font-weight: 600; }
+  ul.results .meta { grid-column: 2 / 4; color: var(--muted); font-size: 12px; }
+  ul.results .dist { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .empty { padding: 24px 16px; color: var(--muted); }
+
+  footer { padding: 8px 16px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--border); }
+
+  #map { height: 100%; width: 100%; background: var(--bg); }
+
+  .pin {
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.45);
+  }
+  .origin-pin {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent); border: 3px solid #fff; box-shadow: 0 0 0 2px var(--accent);
+  }
+
+  .pin.selected { transform: scale(1.4); box-shadow: 0 0 0 3px var(--accent), 0 1px 4px rgba(0,0,0,.5); }
+
+  /* Details panel */
+  aside.showing-details .controls,
+  aside.showing-details .summary,
+  aside.showing-details ul.results { display: none; }
+  #details { flex: 1; overflow-y: auto; padding: 12px 16px 20px; }
+  #details[hidden] { display: none; }
+  .detail-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .detail .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  }
+  .detail .badge .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .detail h2 { font-size: 20px; line-height: 1.25; margin: 6px 0 4px; }
+  .detail .sub { color: var(--muted); margin: 0 0 2px; }
+  .detail .distance { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .detail .actions-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 4px; }
+  .detail .actions-row a {
+    text-decoration: none; color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 12px; font-size: 13px; font-weight: 600; background: var(--input);
+  }
+  .detail .actions-row a:hover { background: var(--hover); }
+  .detail .actions-row a.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  .detail section { border-top: 1px solid var(--border); padding: 12px 0; }
+  .detail h3 {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--muted); margin: 0 0 6px;
+  }
+  .detail p { margin: 0; overflow-wrap: anywhere; }
+  .detail a { color: var(--accent); }
+  .detail ul.offers { margin: 0; padding-left: 18px; }
+  .detail ul.offers li { margin: 2px 0; }
+  .detail ul.offers .muted { color: var(--muted); font-size: 12px; }
+  .detail .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .detail .tag { border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; font-size: 12px; }
+  .detail .note {
+    background: var(--hover); border-radius: 8px; padding: 10px 12px;
+    font-size: 13px; color: var(--muted); margin-top: 12px;
+  }
+
+  @media (max-width: 760px) {
+    body { grid-template-columns: 100%; grid-template-rows: auto 55vh; height: auto; }
+    html, body { height: auto; }
+    aside { border-right: none; border-bottom: 1px solid var(--border); order: 2; }
+    #map { order: 1; height: 55vh; }
+    ul.results { max-height: none; }
+  }
+</style>
+</head>
+<body>
+<aside>
+  <div class="controls">
+    <div class="title-row">
+      <h1>AWO Facility Map</h1>
+      <div class="lang" role="group" aria-label="Category language">
+        <button type="button" data-lang="en" aria-pressed="true">EN</button>
+        <button type="button" data-lang="de" aria-pressed="false">DE</button>
+      </div>
+    </div>
+    <p class="subtitle">Find social services near a place in Berlin.</p>
+
+    <label class="field" for="location">Near</label>
+    <form class="row" id="search-form">
+      <input type="search" id="location" placeholder="Postal code, street or place" autocomplete="off">
+      <button type="submit" class="primary">Search</button>
+    </form>
+    <div class="row" style="margin-top:8px; align-items:center; justify-content:space-between">
+      <button type="button" id="locate">Use my location</button>
+      <span style="display:flex; align-items:center; gap:6px">
+        <label for="radius" style="font-size:12px; color:var(--muted)">Within</label>
+        <select id="radius">
+          <option value="0.5">0.5 km</option>
+          <option value="1">1 km</option>
+          <option value="2" selected>2 km</option>
+          <option value="5">5 km</option>
+          <option value="10">10 km</option>
+        </select>
+      </span>
+    </div>
+    <div class="status" id="status">Tip: you can also click the map to search there.</div>
+
+    <label class="field" for="query">Filter</label>
+    <input type="text" id="query" placeholder="e.g. Alkohol, Jugend, Beratung">
+
+    <label class="field">Groups <button type="button" class="link" id="toggle-groups">all / none</button></label>
+    <div class="groups" id="groups"></div>
+
+    <label class="check"><input type="checkbox" id="accessible"> Wheelchair accessible only</label>
+  </div>
+
+  <div class="summary" id="summary">Loading facilities…</div>
+  <ul class="results" id="results"></ul>
+  <section id="details" hidden aria-live="polite"></section>
+  <footer>
+    Data: AWO / civic-data.de federated directory<span id="generated"></span>.
+    Place search uses OpenStreetMap Nominatim.
+  </footer>
+</aside>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+const GROUP_COLORS = {
+  "Suchthilfe": "#ea580c",
+  "Beratung & soziale Hilfen": "#2563eb",
+  "Kinder & Jugend": "#16a34a",
+  "Wohnungslosen- & Notfallhilfe": "#9333ea",
+  "Senioren & Pflege": "#0891b2",
+  "Behinderung & Teilhabe": "#ca8a04",
+  "Migration": "#db2777",
+  "Gesundheit": "#991b1b",
+  "Sonstige": "#6b7280",
+};
+const BERLIN = [52.52, 13.405];
+
+// Group keys are the German names used in facilities.json.
+const GROUP_LABELS = {
+  "Suchthilfe": "Addiction help",
+  "Beratung & soziale Hilfen": "Counseling & social help",
+  "Kinder & Jugend": "Children & youth",
+  "Wohnungslosen- & Notfallhilfe": "Homelessness & emergency help",
+  "Senioren & Pflege": "Seniors & care",
+  "Behinderung & Teilhabe": "Disability & inclusion",
+  "Migration": "Migration",
+  "Gesundheit": "Health",
+  "Sonstige": "Other",
+};
+
+function loadLang() {
+  try {
+    return localStorage.getItem("awo-map-lang") === "de" ? "de" : "en";
+  } catch {
+    return "en";
+  }
+}
+
+function groupLabel(group) {
+  return state.lang === "de" ? group : (GROUP_LABELS[group] || group);
+}
+
+const state = {
+  facilities: [],
+  markers: new Map(),
+  origin: null,
+  activeGroups: new Set(Object.keys(GROUP_COLORS)),
+  lang: loadLang(),
+  selected: null,
+  resultsScroll: 0,
+};
+
+const $ = (id) => document.getElementById(id);
+
+// ---------- Map ----------
+
+const map = L.map("map", { zoomControl: true }).setView(BERLIN, 11);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+}).addTo(map);
+
+const cluster = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 40 });
+map.addLayer(cluster);
+
+let originMarker = null;
+let radiusCircle = null;
+let pendingFit = false;
+
+// Leaflet can't fit bounds while the map has no size (e.g. a hidden tab),
+// so refit once it is laid out.
+new ResizeObserver(() => {
+  map.invalidateSize();
+  if (pendingFit && map.getSize().x > 0) fitAll();
+}).observe(document.getElementById("map"));
+
+function fitAll() {
+  if (!state.facilities.length) return;
+  if (map.getSize().x === 0) {
+    pendingFit = true;
+    return;
+  }
+  pendingFit = false;
+  map.fitBounds(L.latLngBounds(state.facilities.map((f) => [f.latitude, f.longitude])), { padding: [20, 20] });
+}
+
+map.on("click", (event) => {
+  setOrigin(event.latlng.lat, event.latlng.lng, "the selected point");
+});
+
+// ---------- Helpers ----------
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
+function distanceKm(lat1, lon1, lat2, lon2) {
+  const rad = Math.PI / 180;
+  const a = Math.sin((lat2 - lat1) * rad / 2) ** 2
+    + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin((lon2 - lon1) * rad / 2) ** 2;
+  return 6371 * 2 * Math.asin(Math.sqrt(a));
+}
+
+function homepageUrl(value) {
+  if (!value) return null;
+  return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
+// The source data stores German numbers as plain integers, which dropped the
+// leading 0 (e.g. "30233240350" for 030 233240350). Restore it for display.
+// Values in scientific notation ("3.06663E+12") lost digits and can't be fixed.
+function formatPhone(value) {
+  if (!value) return null;
+  if (/e\+/i.test(value)) return null;
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed) && !trimmed.startsWith("0")) return `0${trimmed}`;
+  return trimmed;
+}
+
+function telUrl(phone) {
+  const digits = (phone || "").replace(/[^\d+]/g, "");
+  return digits.length >= 6 ? `tel:${digits}` : null;
+}
+
+function setStatus(text, isError = false) {
+  const el = $("status");
+  el.textContent = text;
+  el.classList.toggle("error", isError);
+}
+
+// ---------- Details panel ----------
+
+function pinIcon(f, selected = false) {
+  return L.divIcon({
+    className: "",
+    html: `<div class="pin${selected ? " selected" : ""}" style="background:${GROUP_COLORS[f.group] || GROUP_COLORS.Sonstige}"></div>`,
+    iconSize: [16, 16],
+  });
+}
+
+function hostName(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "source";
+  }
+}
+
+function detailsHtml(f) {
+  const phone = formatPhone(f.telephone);
+  const tel = telUrl(phone);
+  const site = homepageUrl(f.homepage);
+  const directions = `https://www.google.com/maps/dir/?api=1&destination=${f.latitude},${f.longitude}`;
+  const distance = state.origin
+    ? distanceKm(state.origin.lat, state.origin.lng, f.latitude, f.longitude)
+    : null;
+
+  const actions = [
+    `<a class="primary" href="${directions}" target="_blank" rel="noopener">Directions</a>`,
+    tel ? `<a href="${escapeHtml(tel)}">Call</a>` : "",
+    f.email ? `<a href="mailto:${escapeHtml(f.email)}">Email</a>` : "",
+    site ? `<a href="${escapeHtml(site)}" target="_blank" rel="noopener">Website</a>` : "",
+  ].join("");
+
+  const sections = [];
+  const section = (title, body) => sections.push(`<section><h3>${title}</h3>${body}</section>`);
+
+  if (f.address) section("Address", `<p>${escapeHtml(f.address)}</p>`);
+  if (f.opening_hours) section("Opening hours", `<p>${escapeHtml(f.opening_hours)}</p>`);
+
+  const contact = [
+    phone ? `<p>Phone: ${tel ? `<a href="${escapeHtml(tel)}">${escapeHtml(phone)}</a>` : escapeHtml(phone)}</p>` : "",
+    f.email ? `<p>Email: <a href="mailto:${escapeHtml(f.email)}">${escapeHtml(f.email)}</a></p>` : "",
+    site ? `<p>Website: <a href="${escapeHtml(site)}" target="_blank" rel="noopener">${escapeHtml(f.homepage)}</a></p>` : "",
+  ].join("");
+  if (contact) section("Contact", contact);
+
+  if (f.offers.length) {
+    section("Offers", `<ul class="offers">${f.offers.map((o) => `
+      <li>${escapeHtml(o.name)}${o.category ? ` <span class="muted">· ${escapeHtml(o.category)}</span>` : ""}</li>`).join("")}</ul>`);
+  }
+  if (f.services) section("Services", `<p>${escapeHtml(f.services)}</p>`);
+  if (f.audience.length) {
+    section("Topics", `<div class="tags">${f.audience.map((a) => `<span class="tag">${escapeHtml(a)}</span>`).join("")}</div>`);
+  }
+  if (f.accessible !== null) {
+    section("Accessibility", `<p>${f.accessible ? "Wheelchair accessible" : "Not wheelchair accessible"}</p>`);
+  }
+  if (f.provider || f.provider_type) {
+    section("Provider", `<p>${escapeHtml(f.provider || "")}${f.provider && f.provider_type ? "<br>" : ""}${f.provider_type ? `<span style="color:var(--muted)">${escapeHtml(f.provider_type)}</span>` : ""}</p>`);
+  }
+  if (f.source_url) {
+    section("More information", `<p><a href="${escapeHtml(f.source_url)}" target="_blank" rel="noopener">View entry on ${escapeHtml(hostName(f.source_url))}</a></p>`);
+  }
+
+  const sparse = !phone && !f.email && !site && !f.opening_hours;
+
+  return `
+    <div class="detail">
+      <div class="detail-top">
+        <button type="button" id="back">← Back to results</button>
+        <button type="button" id="share">Copy link</button>
+      </div>
+      <span class="badge" style="color:${GROUP_COLORS[f.group]}">
+        <span class="dot" style="background:${GROUP_COLORS[f.group]}"></span>${escapeHtml(groupLabel(f.group))}
+      </span>
+      <h2>${escapeHtml(f.name)}</h2>
+      ${f.alternate_name && f.alternate_name !== f.name ? `<p class="sub">${escapeHtml(f.alternate_name)}</p>` : ""}
+      ${f.category ? `<p class="sub">${escapeHtml(f.category)}</p>` : ""}
+      ${distance !== null ? `<div class="distance">${distance.toFixed(1)} km from ${escapeHtml(state.origin.label)}</div>` : ""}
+      <div class="actions-row">${actions}</div>
+      ${sparse ? `<div class="note">Contact details aren't available for this facility yet.${f.source_url ? " The source entry below may have more." : " Try searching for its name online."}</div>` : ""}
+      ${sections.join("")}
+    </div>`;
+}
+
+function facilityId(f) {
+  return f.iri.split("#").pop();
+}
+
+function showDetails(f) {
+  const aside = document.querySelector("aside");
+  if (!aside.classList.contains("showing-details")) state.resultsScroll = $("results").scrollTop;
+
+  if (state.selected && state.selected !== f.iri) {
+    const previous = state.facilities.find((x) => x.iri === state.selected);
+    state.markers.get(state.selected)?.setIcon(pinIcon(previous));
+  }
+  state.selected = f.iri;
+  state.markers.get(f.iri).setIcon(pinIcon(f, true));
+
+  const panel = $("details");
+  panel.innerHTML = detailsHtml(f);
+  panel.hidden = false;
+  panel.scrollTop = 0;
+  aside.classList.add("showing-details");
+
+  $("back").addEventListener("click", hideDetails);
+  $("share").addEventListener("click", async (event) => {
+    try {
+      await navigator.clipboard.writeText(location.href);
+      event.target.textContent = "Link copied";
+    } catch {
+      event.target.textContent = "Copy the address bar";
+    }
+  });
+
+  history.replaceState(null, "", `#${facilityId(f)}`);
+
+}
+
+function hideDetails() {
+  if (state.selected) {
+    const f = state.facilities.find((x) => x.iri === state.selected);
+    state.markers.get(state.selected)?.setIcon(pinIcon(f));
+  }
+  state.selected = null;
+  $("details").hidden = true;
+  document.querySelector("aside").classList.remove("showing-details");
+  $("results").scrollTop = state.resultsScroll;
+  history.replaceState(null, "", location.pathname + location.search);
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.selected) hideDetails();
+});
+
+// Open a shared link like index.html#org-229a4e0b1081.
+function openFromHash() {
+  const id = location.hash.slice(1);
+  const linked = id && state.facilities.find((f) => facilityId(f) === id);
+  if (!linked || linked.iri === state.selected) return;
+  showDetails(linked);
+  // Jump without animation so it can't race the initial fit, then let the
+  // cluster spread out pins that share an address.
+  map.setView([linked.latitude, linked.longitude], 17, { animate: false });
+  // The cluster redraws for the new zoom shortly after; spread it once it has.
+  setTimeout(() => {
+    const marker = state.markers.get(linked.iri);
+    const parent = cluster.getVisibleParent(marker);
+    if (parent && parent !== marker) parent.spiderfy();
+  }, 300);
+}
+
+// ---------- Filtering & rendering ----------
+
+function matchesFilters(f) {
+  if (!state.activeGroups.has(f.group)) return false;
+  if ($("accessible").checked && f.accessible !== true) return false;
+
+  const query = $("query").value.trim().toLowerCase();
+  if (query) {
+    const text = [
+      f.name, f.alternate_name, f.group, GROUP_LABELS[f.group], f.category, f.services,
+      f.offers.map((o) => `${o.name} ${o.category || ""}`).join(" "), f.audience.join(" "), f.address,
+    ]
+      .filter(Boolean).join(" ").toLowerCase();
+    if (!text.includes(query)) return false;
+  }
+  return true;
+}
+
+function render() {
+  const radius = parseFloat($("radius").value);
+
+  let visible = state.facilities.filter(matchesFilters);
+
+  if (state.origin) {
+    visible = visible
+      .map((f) => ({ ...f, distance: distanceKm(state.origin.lat, state.origin.lng, f.latitude, f.longitude) }))
+      .filter((f) => f.distance <= radius)
+      .sort((a, b) => a.distance - b.distance);
+  } else {
+    visible = [...visible].sort((a, b) => a.name.localeCompare(b.name, "de"));
+  }
+
+  cluster.clearLayers();
+  cluster.addLayers(visible.map((f) => state.markers.get(f.iri)));
+
+  const list = $("results");
+  list.innerHTML = "";
+
+  if (!visible.length) {
+    list.innerHTML = `<li class="empty" style="display:block; cursor:default">No facilities match. Try a larger radius or fewer filters.</li>`;
+  }
+
+  for (const f of visible) {
+    const li = document.createElement("li");
+    li.tabIndex = 0;
+    li.innerHTML = `
+      <span class="dot" style="background:${GROUP_COLORS[f.group]}"></span>
+      <span class="name">${escapeHtml(f.name)}</span>
+      <span class="dist">${f.distance !== undefined ? `${f.distance.toFixed(1)} km` : ""}</span>
+      <span class="meta">${escapeHtml(f.address || "")}</span>`;
+    const open = () => {
+      showDetails(f);
+      cluster.zoomToShowLayer(state.markers.get(f.iri), () => {});
+    };
+    li.addEventListener("click", open);
+    li.addEventListener("keydown", (e) => { if (e.key === "Enter") open(); });
+    list.appendChild(li);
+  }
+
+  $("summary").textContent = state.origin
+    ? `${visible.length} ${visible.length === 1 ? "facility" : "facilities"} within ${radius} km of ${state.origin.label}`
+    : `${visible.length} of ${state.facilities.length} facilities`;
+}
+
+function setOrigin(lat, lng, label) {
+  state.origin = { lat, lng, label };
+  const radiusMeters = parseFloat($("radius").value) * 1000;
+
+  if (originMarker) originMarker.remove();
+  if (radiusCircle) radiusCircle.remove();
+
+  originMarker = L.marker([lat, lng], {
+    icon: L.divIcon({ className: "", html: '<div class="origin-pin"></div>', iconSize: [18, 18] }),
+    interactive: false,
+    zIndexOffset: 1000,
+  }).addTo(map);
+  radiusCircle = L.circle([lat, lng], {
+    radius: radiusMeters, color: "#c8102e", weight: 1.5, fillOpacity: 0.06, interactive: false,
+  }).addTo(map);
+
+  // Render before zooming: re-clustering mid-animation cancels the zoom.
+  render();
+  setStatus(`Showing results near ${label}.`);
+  map.fitBounds(radiusCircle.getBounds(), { padding: [20, 20] });
+}
+
+// ---------- Location lookup ----------
+
+function average(points) {
+  return {
+    lat: points.reduce((sum, p) => sum + p.latitude, 0) / points.length,
+    lng: points.reduce((sum, p) => sum + p.longitude, 0) / points.length,
+  };
+}
+
+async function resolveLocation(text) {
+  const coords = text.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (coords) return { lat: parseFloat(coords[1]), lng: parseFloat(coords[2]), label: text };
+
+  if (/^\d{5}$/.test(text)) {
+    const matches = state.facilities.filter((f) => f.postal_code === text);
+    if (matches.length) return { ...average(matches), label: text };
+  }
+
+  const lower = text.toLowerCase();
+  const streetMatches = state.facilities.filter((f) => (f.address || "").toLowerCase().startsWith(lower));
+  if (streetMatches.length) return { ...average(streetMatches), label: text };
+
+  const params = new URLSearchParams({
+    format: "json", q: text, limit: "1", countrycodes: "de",
+    viewbox: "13.08,52.68,13.77,52.33", bounded: "0",
+  });
+  const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+    headers: { "Accept-Language": "de" },
+  });
+  if (!response.ok) throw new Error("Place search is unavailable right now.");
+  const [hit] = await response.json();
+  if (!hit) return null;
+  return { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon), label: hit.display_name.split(",").slice(0, 2).join(",") };
+}
+
+$("search-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const text = $("location").value.trim();
+  if (!text) return;
+
+  setStatus("Searching…");
+  try {
+    const place = await resolveLocation(text);
+    if (!place) {
+      setStatus(`Couldn't find "${text}". Try a postal code or street name.`, true);
+      return;
+    }
+    setOrigin(place.lat, place.lng, place.label);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+});
+
+$("locate").addEventListener("click", () => {
+  if (!navigator.geolocation) {
+    setStatus("Your browser can't share its location.", true);
+    return;
+  }
+  setStatus("Finding your location…");
+  navigator.geolocation.getCurrentPosition(
+    (pos) => setOrigin(pos.coords.latitude, pos.coords.longitude, "your location"),
+    () => setStatus("Location access was denied or unavailable.", true),
+    { timeout: 10000 },
+  );
+});
+
+$("radius").addEventListener("change", () => {
+  if (state.origin) setOrigin(state.origin.lat, state.origin.lng, state.origin.label);
+  else render();
+});
+$("query").addEventListener("input", render);
+$("accessible").addEventListener("change", render);
+
+// ---------- Group chips ----------
+
+function buildGroupChips() {
+  const counts = {};
+  for (const f of state.facilities) counts[f.group] = (counts[f.group] || 0) + 1;
+
+  const container = $("groups");
+  for (const [group, color] of Object.entries(GROUP_COLORS)) {
+    if (!counts[group]) continue;
+    const chip = document.createElement("label");
+    chip.className = "chip";
+    chip.dataset.group = group;
+    chip.dataset.count = counts[group];
+    chip.innerHTML = `<input type="checkbox" checked><span class="dot" style="background:${color}"></span><span class="label"></span>`;
+    chip.querySelector("input").addEventListener("change", (e) => {
+      if (e.target.checked) state.activeGroups.add(group);
+      else state.activeGroups.delete(group);
+      chip.classList.toggle("off", !e.target.checked);
+      render();
+    });
+    container.appendChild(chip);
+  }
+
+  updateGroupLabels();
+
+  $("toggle-groups").addEventListener("click", () => {
+    const turnOn = state.activeGroups.size === 0;
+    container.querySelectorAll(".chip").forEach((chip) => {
+      const input = chip.querySelector("input");
+      input.checked = turnOn;
+      input.dispatchEvent(new Event("change"));
+    });
+  });
+}
+
+// ---------- Category language ----------
+
+function updateGroupLabels() {
+  document.querySelectorAll(".chip").forEach((chip) => {
+    const group = chip.dataset.group;
+    chip.querySelector(".label").textContent = `${groupLabel(group)} (${chip.dataset.count})`;
+    chip.title = state.lang === "de" ? GROUP_LABELS[group] : group;
+  });
+  document.querySelectorAll(".lang button").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.lang === state.lang));
+  });
+}
+
+document.querySelectorAll(".lang button").forEach((button) => {
+  button.addEventListener("click", () => {
+    state.lang = button.dataset.lang;
+    try {
+      localStorage.setItem("awo-map-lang", state.lang);
+    } catch {
+      // Storage may be blocked; the choice just won't be remembered.
+    }
+    updateGroupLabels();
+    if (state.selected) {
+      showDetails(state.facilities.find((f) => f.iri === state.selected));
+    }
+  });
+});
+
+// ---------- Load data ----------
+
+fetch("facilities.json")
+  .then((response) => {
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  })
+  .then((data) => {
+    state.facilities = data.facilities;
+    if (data.generated) $("generated").textContent = `, exported ${data.generated}`;
+
+    for (const f of state.facilities) {
+      const marker = L.marker([f.latitude, f.longitude], { icon: pinIcon(f), keyboard: true });
+      marker.bindTooltip(f.name, { direction: "top", offset: [0, -8] });
+      marker.on("click", () => showDetails(f));
+      state.markers.set(f.iri, marker);
+    }
+
+    buildGroupChips();
+    render();
+    if (location.hash) {
+      openFromHash();
+    } else {
+      fitAll();
+    }
+    window.addEventListener("hashchange", openFromHash);
+  })
+  .catch((error) => {
+    $("summary").textContent = `Couldn't load facilities.json (${error.message}). Serve this folder over HTTP, e.g. "python -m http.server" in docs/.`;
+  });
+</script>
+</body>
+</html>

@@ -6,7 +6,7 @@ import sys
 import pandas as pd
 from mcp.server.fastmcp import FastMCP
 
-from src.data_loader import DataLoader
+from src.data_loader import DataLoader, resolve_source
 from src.data_repository import DataRepository
 
 
@@ -15,14 +15,14 @@ from src.data_repository import DataRepository
 # --------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
+DATA_SOURCE = resolve_source(BASE_DIR)
 
 
 # --------------------------------------------------
 # Load data
 # --------------------------------------------------
 
-loader = DataLoader(DATA_DIR)
+loader = DataLoader(DATA_SOURCE)
 datasets = loader.load_all()
 
 repository = DataRepository(datasets)
@@ -217,8 +217,9 @@ def get_awo_details(iri: str) -> str:
             get_facility_details.
 
     Returns:
-        JSON containing the facility's address, Google Maps link,
-        telephone, homepage, opening hours, and accessibility notes.
+        JSON containing the facility's address, Google Maps link, contact
+        details, opening hours, accessibility, offers, provider, and a link
+        to its entry in the source directory (caritas.de or dhs.de).
     """
 
     result = repository.get_awo_details(iri)
@@ -227,6 +228,44 @@ def get_awo_details(iri: str) -> str:
         return f"No AWO facility found with IRI '{iri}'."
 
     return to_json(result)
+
+@mcp.tool()
+def find_nearby(
+    location: str,
+    radius_km: float = 2.0,
+    query: str | None = None,
+    accessible_only: bool = False,
+    limit: int = 10,
+) -> str:
+    """
+    Find AWO facilities near a location, nearest first.
+
+    Args:
+        location: "latitude,longitude" (for example "52.5446,13.3592"),
+            a postal code (for example "13353"), or part of a street name
+            (for example "Müllerstraße"). For a landmark or neighbourhood,
+            pass its approximate coordinates.
+        radius_km: Search radius in kilometres. Defaults to 2.
+        query: Optional search term matched against name, group (German or
+            English), category, services, and audience (for example "Sucht",
+            "addiction", "Jugend", "Alkohol").
+        accessible_only: Only return facilities marked as wheelchair accessible.
+        limit: Maximum number of results. Defaults to 10.
+
+    Returns:
+        JSON containing the resolved origin, the number of matches, and the
+        nearest facilities with distance, address, contact, and opening hours.
+    """
+
+    results = repository.find_nearby(
+        location,
+        radius_km=radius_km,
+        query=query,
+        accessible_only=accessible_only,
+        limit=limit,
+    )
+
+    return to_json(results)
 
 # --------------------------------------------------
 # Run server

@@ -22,3 +22,11 @@ Thumbs.db
 
 # Environment variables
 .env
+
+# Claude Code local settings
+.claude/
+
+# Data comes from the federated directory (AWO_DATA_SOURCE); keep local copies out of git
+data/
+/directory.ttl
+docs/facilities.json

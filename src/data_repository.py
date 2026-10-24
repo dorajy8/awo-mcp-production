@@ -1,4 +1,5 @@
-from urllib.parse import quote
+import math
+from urllib.parse import parse_qs, quote, urlparse
 
 import pandas as pd
 
@@ -35,6 +36,23 @@ class DataRepository:
                 "foaf:homepage": provider["foaf:homepage"],
                 "schema:address": provider["schema:address"],
             }
+
+        self.offers_by_facility = {}
+        for _, offer in self.angebot.iterrows():
+            name = clean(offer["schema:name"])
+            category = clean(offer["schema:category"])
+            entry = {
+                "name": name or category,
+                "category": category if name and category != name else None,
+            }
+
+            if not entry["name"]:
+                continue
+
+            offers = self.offers_by_facility.setdefault(offer["schema:provider"], [])
+
+            if entry not in offers:
+                offers.append(entry)
 
     def count_facilities(self, city: str) -> int:
         """Count facilities in a city."""
@@ -497,18 +515,7 @@ class DataRepository:
 
         facility = matches.iloc[0]
         address = self.address_by_iri.get(facility["schema:address"]) or {}
-
-        def clean(value):
-            if pd.isna(value):
-                return ""
-            return str(value).strip()
-
-        street = clean(address.get("schema:streetAddress"))
-        postal_code = clean(address.get("schema:postalCode"))
-        city = clean(address.get("schema:addressLocality"))
-
-        locality = " ".join(part for part in [postal_code, city] if part)
-        address_text = ", ".join(part for part in [street, locality] if part)
+        address_text = format_address(address)
 
         latitude = address.get("schema:latitude")
         longitude = address.get("schema:longitude")
@@ -530,10 +537,353 @@ class DataRepository:
         return {
             "iri": facility["iri"],
             "name": facility["schema:name"],
+            "alternate_name": first_line(facility["schema:alternateName"]) or None,
+            "category": clean(facility["schema:category"]) or None,
             "address": address_text or None,
             "map_url": map_url,
             "telephone": facility["schema:telephone"],
+            "email": facility["schema:email"],
             "homepage": facility["foaf:homepage"],
+            "source_url": source_url(facility["schema:mainEntityOfPage"]),
             "opening_hours": facility["schema:openingHours"],
             "accessibility": facility["schema:accessibilitySummary"],
+            "offers": self.offers_by_facility.get(facility["iri"], []),
+            "provider": clean(
+                (self.provider_by_iri.get(facility["schema:parentOrganization"]) or {})
+                .get("schema:name")
+            ) or None,
         }
+
+    def facility_points(self) -> list[dict]:
+        """Return every facility that has coordinates, ready for a map."""
+
+        points = []
+
+        for _, facility in self.einrichtung.iterrows():
+            address = self.address_by_iri.get(facility["schema:address"])
+
+            if not address:
+                continue
+
+            latitude = to_float(address.get("schema:latitude"))
+            longitude = to_float(address.get("schema:longitude"))
+
+            if latitude is None or longitude is None:
+                continue
+
+            provider = self.provider_by_iri.get(
+                facility["schema:parentOrganization"]
+            ) or {}
+
+            offers = self.offers_by_facility.get(facility["iri"], [])
+            group = facility_group(facility, offers)
+
+            points.append(
+                {
+                    "iri": facility["iri"],
+                    "name": clean(facility["schema:name"]),
+                    "alternate_name": first_line(facility["schema:alternateName"]) or None,
+                    "group": group,
+                    "group_en": GROUP_LABELS_EN[group],
+                    "category": clean(facility["schema:category"]) or None,
+                    "audience": split_list(facility["schema:audience"]),
+                    "services": clean(facility["schema:availableService"]) or None,
+                    "offers": offers,
+                    "accessible": accessibility_flag(
+                        facility["schema:accessibilitySummary"]
+                    ),
+                    "address": format_address(address) or None,
+                    "postal_code": clean(address.get("schema:postalCode")) or None,
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "telephone": clean(facility["schema:telephone"]) or None,
+                    "email": clean(facility["schema:email"]) or None,
+                    "homepage": clean(facility["foaf:homepage"]) or None,
+                    "source_url": source_url(facility["schema:mainEntityOfPage"]),
+                    "opening_hours": clean(facility["schema:openingHours"]) or None,
+                    "provider": clean(provider.get("schema:name")) or None,
+                    "provider_type": clean(facility["cdf:parentOrgClassification"]) or None,
+                }
+            )
+
+        return points
+
+    def resolve_location(self, location: str) -> dict | None:
+        """
+        Turn a location into coordinates without calling an external service.
+
+        Accepts "latitude,longitude", a postal code, or part of a street
+        name. Postal codes and streets resolve to the average position of
+        the known addresses that match.
+        """
+
+        text = location.strip()
+        parts = [part.strip() for part in text.split(",")]
+
+        if len(parts) == 2:
+            latitude, longitude = to_float(parts[0]), to_float(parts[1])
+
+            if latitude is not None and longitude is not None:
+                return {
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "matched_by": "coordinates",
+                }
+
+        addresses = [
+            address
+            for address in self.address_by_iri.values()
+            if to_float(address.get("schema:latitude")) is not None
+            and to_float(address.get("schema:longitude")) is not None
+        ]
+
+        if text.isdigit():
+            matched_by = "postal_code"
+            matches = [
+                address
+                for address in addresses
+                if clean(address.get("schema:postalCode")) == text
+            ]
+        else:
+            matched_by = "street"
+            matches = [
+                address
+                for address in addresses
+                if text.casefold()
+                in clean(address.get("schema:streetAddress")).casefold()
+            ]
+
+        if not matches:
+            return None
+
+        return {
+            "latitude": sum(
+                to_float(address["schema:latitude"]) for address in matches
+            ) / len(matches),
+            "longitude": sum(
+                to_float(address["schema:longitude"]) for address in matches
+            ) / len(matches),
+            "matched_by": matched_by,
+            "matched_addresses": len(matches),
+        }
+
+    def find_nearby(
+        self,
+        location: str,
+        radius_km: float = 2.0,
+        query: str | None = None,
+        accessible_only: bool = False,
+        limit: int = 10,
+    ) -> dict:
+        """Find facilities within a radius of a location, nearest first."""
+
+        origin = self.resolve_location(location)
+
+        if origin is None:
+            return {
+                "location": location,
+                "error": (
+                    "Could not resolve the location. Use 'latitude,longitude', "
+                    "a postal code, or a street name from the dataset."
+                ),
+                "results": [],
+            }
+
+        results = []
+
+        for point in self.facility_points():
+            if accessible_only and point["accessible"] is not True:
+                continue
+
+            if query and not matches_query(point, query):
+                continue
+
+            distance = haversine_km(
+                origin["latitude"],
+                origin["longitude"],
+                point["latitude"],
+                point["longitude"],
+            )
+
+            if distance > radius_km:
+                continue
+
+            results.append({**point, "distance_km": round(distance, 2)})
+
+        results.sort(key=lambda point: point["distance_km"])
+
+        return {
+            "location": location,
+            "origin": origin,
+            "radius_km": radius_km,
+            "total_found": len(results),
+            "results": results[:limit],
+        }
+
+
+# --------------------------------------------------
+# Helpers
+# --------------------------------------------------
+
+def clean(value) -> str:
+    """Return a stripped string, or "" for missing values."""
+
+    if value is None or pd.isna(value):
+        return ""
+
+    return str(value).strip()
+
+
+def to_float(value) -> float | None:
+    """Convert a value to float, or None if it is missing or invalid."""
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    return None if math.isnan(number) else number
+
+
+def first_line(value) -> str:
+    """Return the first line of a multi-line cell."""
+
+    return clean(value).splitlines()[0].strip() if clean(value) else ""
+
+
+def source_url(value) -> str | None:
+    """
+    Return the facility's page in its source directory.
+
+    Caritas entries are stored as relative redirect links
+    ("/search.ashx?...&u=<real url>"), so the real URL is taken from "u".
+    """
+
+    text = clean(value)
+
+    if text.startswith(("http://", "https://")):
+        return text
+
+    if text.startswith("/search.ashx"):
+        target = parse_qs(urlparse(text).query).get("u", [""])[0]
+        return target.split("?")[0] or None
+
+    return None
+
+
+def split_list(value) -> list[str]:
+    """Split a comma-separated cell into a list of values."""
+
+    return [part.strip() for part in clean(value).split(",") if part.strip()]
+
+
+def format_address(address: dict) -> str:
+    """Format an address record as "Street, Postal code City"."""
+
+    street = clean(address.get("schema:streetAddress"))
+    postal_code = clean(address.get("schema:postalCode"))
+    city = clean(address.get("schema:addressLocality"))
+
+    locality = " ".join(part for part in [postal_code, city] if part)
+
+    return ", ".join(part for part in [street, locality] if part)
+
+
+def accessibility_flag(summary) -> bool | None:
+    """Read the accessibility sentence as True, False, or None if unknown."""
+
+    text = clean(summary).casefold()
+
+    if "nicht barrierefrei" in text:
+        return False
+
+    if "barrierefrei" in text:
+        return True
+
+    return None
+
+
+FACILITY_GROUPS = [
+    ("Suchthilfe", ["sucht", "drogen", "blaukreuz"]),
+    ("Wohnungslosen- & Notfallhilfe", [
+        "wohnungslos", "wohnungsnot", "obdach", "kältehilfe", "notübernachtung",
+        "übergangshaus", "kleider",
+    ]),
+    ("Kinder & Jugend", [
+        "kinder", "jugend", "schule", "kita", "familie", "eltern", "mütter",
+    ]),
+    ("Senioren & Pflege", ["senior", "pflege", "altenhilfe", "sgb xi"]),
+    ("Behinderung & Teilhabe", ["behinder", "eingliederung"]),
+    ("Migration", ["migration", "zugewandert", "flücht", "integration"]),
+    ("Gesundheit", ["gesundheit", "krankenhaus", "klinik", "ambulanz", "psych"]),
+    ("Beratung & soziale Hilfen", ["beratung", "soziale", "soziotherap", "wohn"]),
+]
+
+
+GROUP_LABELS_EN = {
+    "Suchthilfe": "Addiction help",
+    "Wohnungslosen- & Notfallhilfe": "Homelessness & emergency help",
+    "Kinder & Jugend": "Children & youth",
+    "Senioren & Pflege": "Seniors & care",
+    "Behinderung & Teilhabe": "Disability & inclusion",
+    "Migration": "Migration",
+    "Gesundheit": "Health",
+    "Beratung & soziale Hilfen": "Counseling & social help",
+    "Sonstige": "Other",
+}
+
+
+def facility_group(facility, offers: list[dict] | None = None) -> str:
+    """Assign a facility to one broad group for filtering and map colours."""
+
+    if clean(facility["schema:audience"]):
+        return "Suchthilfe"
+
+    text = " ".join(
+        [
+            clean(facility[column])
+            for column in ["schema:category", "schema:name", "schema:alternateName"]
+        ]
+        + [
+            f"{offer['name']} {offer['category'] or ''}"
+            for offer in offers or []
+        ]
+    ).casefold()
+
+    for group, keywords in FACILITY_GROUPS:
+        if any(keyword in text for keyword in keywords):
+            return group
+
+    return "Sonstige"
+
+
+def matches_query(point: dict, query: str) -> bool:
+    """Check whether a search term appears in a facility's descriptive fields."""
+
+    text = " ".join(
+        [
+            point["name"],
+            point["group"],
+            point["group_en"],
+            point["category"] or "",
+            point["services"] or "",
+            point["alternate_name"] or "",
+            " ".join(offer["name"] for offer in point["offers"]),
+            " ".join(point["audience"]),
+        ]
+    ).casefold()
+
+    return query.casefold() in text
+
+
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Return the great-circle distance between two points in kilometres."""
+
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+
+    a = (
+        math.sin((lat2 - lat1) / 2) ** 2
+        + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    )
+
+    return 6371.0 * 2 * math.asin(math.sqrt(a))
